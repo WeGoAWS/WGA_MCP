@@ -10,8 +10,11 @@ COPY requirements.txt .
 # 또는 직접 설치: RUN pip install --no-cache-dir mcpengine[cli,lambda]
 RUN pip install --no-cache-dir -r requirements.txt
 
+# lambda_mcp 모듈 폴더 복사
+COPY lambda_mcp/ lambda_mcp/
+
 # 애플리케이션 코드의 나머지를 복사합니다
 COPY app.py .
 
-# 핸들러 함수 실행 명령 설정 (app.handler는 app.py의 핸들러를 의미합니다)
-CMD ["app.handler"]
+# 핸들러 함수 실행 명령 설정
+CMD ["app.lambda_handler"]

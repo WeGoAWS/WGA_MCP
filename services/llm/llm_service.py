@@ -25,7 +25,7 @@ def get_client():
         mcp_url = os.environ.get('MCP_URL') or CONFIG.get('mcp', {}).get('function_url')
         mcp_token = os.environ.get('MCP_TOKEN', '')
         region = os.environ.get('AWS_REGION', 'us-east-1')
-        model_id = os.environ.get('BEDROCK_MODEL_ID', 'anthropic.claude-3-haiku-20240307-v1:0')
+        model_id = os.environ.get('BEDROCK_MODEL_ID', 'anthropic.claude-3-sonnet-20240229-v1:0')
 
         # 클라이언트 초기화
         client = BedrockMCPClient(
@@ -80,39 +80,53 @@ def handle_llm1_with_mcp(body, origin):
        - Provide insights into the dashboard's focus areas and how it can be utilized for monitoring specific aspects of the AWS environment.
 
     5. **List and Explore CloudWatch Log Groups:**
-   - Use the `list_log_groups` tool to retrieve all available CloudWatch log groups in the AWS account.
-   - Help the user navigate through these log groups and understand their purpose.
-   - When a user is interested in a specific log group, explain its contents and how to extract relevant information.
-
-   6. **Analyze Specific Log Groups in Detail:**
-   - When a user wants to gain insights about a specific log group, use the `analyze_log_group` tool.
-   - Summarize key metrics like event count, error rates, and time distribution.
-   - Identify common patterns and potential issues based on log content.
-   - Provide actionable recommendations based on the observed patterns and error trends.
-
-    **Guidelines:**
-
-    - Always begin by listing the available CloudWatch dashboards to inform the user of existing monitoring setups.
-    - When analyzing logs or alarms, be thorough yet concise, ensuring clarity in your reporting.
-    - Avoid making assumptions; base your analysis strictly on the data retrieved from AWS tools.
-    - Clearly explain the available AWS services and their monitoring capabilities when prompted by the user.
-
-    **Available AWS Services for Monitoring:**
-
-    - **EC2/Compute Instances** [ec2]
-    - **Lambda Functions** [lambda]
-    - **RDS Databases** [rds]
-    - **EKS Kubernetes** [eks]
-    - **API Gateway** [apigateway]
-    - **CloudTrail** [cloudtrail]
-    - **S3 Storage** [s3]
-    - **VPC Networking** [vpc]
-    - **WAF Web Security** [waf]
-    - **Bedrock** [bedrock/generative AI]
-    - **IAM Logs** [iam] (Use this option when users inquire about security logs or events.)
-
-    Your role is to assist users in monitoring and analyzing their AWS resources effectively, providing actionable insights based on the data available.
-    Provide your answers in Korean.
+       - Use the `list_log_groups` tool to retrieve all available CloudWatch log groups in the AWS account.
+       - Help the user navigate through these log groups and understand their purpose.
+       - When a user is interested in a specific log group, explain its contents and how to extract relevant information.
+    
+    6. **Analyze Specific Log Groups in Detail:**
+       - When a user wants to gain insights about a specific log group, use the `analyze_log_group` tool.
+       - Summarize key metrics like event count, error rates, and time distribution.
+       - Identify common patterns and potential issues based on log content.
+       - Provide actionable recommendations based on the observed patterns and error trends.
+    
+        **Guidelines:**
+    
+        - Always begin by listing the available CloudWatch dashboards to inform the user of existing monitoring setups.
+        - When analyzing logs or alarms, be thorough yet concise, ensuring clarity in your reporting.
+        - Avoid making assumptions; base your analysis strictly on the data retrieved from AWS tools.
+        - Clearly explain the available AWS services and their monitoring capabilities when prompted by the user.
+        
+        **Service Log Prefixes**
+        
+        "ec2": ["/aws/ec2", "/var/log"],
+        "lambda": ["/aws/lambda"],
+        "rds": ["/aws/rds"],
+        "eks": ["/aws/eks"],
+        "apigateway": ["/aws/apigateway"],
+        "cloudtrail": ["/aws/cloudtrail"],
+        "s3": ["/aws/s3", "/aws/s3-access"],
+        "vpc": ["/aws/vpc"],
+        "waf": ["/aws/waf"],
+        "bedrock": [f"/aws/bedrock/modelinvocations"],
+        "iam": ["/aws/dummy-security-logs"]
+    
+        **Available AWS Services for Monitoring:**
+    
+        - **EC2/Compute Instances** [ec2]
+        - **Lambda Functions** [lambda]
+        - **RDS Databases** [rds]
+        - **EKS Kubernetes** [eks]
+        - **API Gateway** [apigateway]
+        - **CloudTrail** [cloudtrail]
+        - **S3 Storage** [s3]
+        - **VPC Networking** [vpc]
+        - **WAF Web Security** [waf]
+        - **Bedrock** [bedrock/generative AI]
+        - **IAM Logs** [iam] (Use this option when users inquire about security logs or events.)
+    
+        Your role is to assist users in monitoring and analyzing their AWS resources effectively, providing actionable insights based on the data available.
+        Provide your answers in Korean.
         """
 
         # MCP 클라이언트 가져오기
@@ -130,8 +144,7 @@ def handle_llm1_with_mcp(body, origin):
 
         # 성공 응답 반환
         return cors_response(200, {
-            "status": "질문 처리 완료",
-            "answer": response_text + f"\n\n소요시간: {elapsed_str}"
+            "answer": response_text
         }, origin)
 
     except Exception as e:

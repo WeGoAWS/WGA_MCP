@@ -7,6 +7,144 @@ from datetime import datetime, timezone
 from common.config import get_config
 from common.utils import invoke_bedrock_nova, cors_headers, cors_response
 from slack_sdk import WebClient
+from mcp_bedrock_client import BedrockMCPClient
+
+# Lambda 환경에서 효율적인 재사용을 위한 클라이언트 캐싱
+client = None
+
+
+def get_client():
+    """
+    MCP 클라이언트 인스턴스를 가져오거나 생성
+    Lambda 콜드 스타트 최적화를 위해 전역 변수로 재사용
+    """
+    global client
+    if client is None:
+        # 환경 변수에서 구성 가져오기
+        CONFIG = get_config()
+        mcp_url = os.environ.get('MCP_URL') or CONFIG.get('mcp', {}).get('function_url')
+        mcp_token = os.environ.get('MCP_TOKEN', '')
+        region = os.environ.get('AWS_REGION', 'us-east-1')
+        model_id = os.environ.get('BEDROCK_MODEL_ID', 'anthropic.claude-3-haiku-20240307-v1:0')
+
+        # 클라이언트 초기화
+        client = BedrockMCPClient(
+            mcp_url=mcp_url,
+            region=region,
+            auth_token=mcp_token,
+            model_id=model_id
+        )
+        # 세션 초기화 및 도구 로드
+        client.initialize()
+
+    return client
+
+
+def handle_llm1_with_mcp(body, origin):
+    """
+    MCP 클라이언트를 사용하여 llm1 요청을 처리
+
+    Args:
+        body: 요청 본문
+        origin: CORS origin
+
+    Returns:
+        응답 객체
+    """
+    try:
+        # 사용자 입력 추출
+        user_input = body.get('question') or body.get('text') or body.get('input', {}).get('text', '')
+        if not user_input:
+            return cors_response(400, {"error": "사용자 입력이 제공되지 않았습니다."}, origin)
+
+        # 시스템 프롬프트 설정
+        system_prompt = """You are the monitoring agent responsible for analyzing AWS resources, including CloudWatch logs, alarms, and dashboards. Your tasks include:
+
+    1. **List Available CloudWatch Dashboards:**
+       - Utilize the `list_cloudwatch_dashboards` tool to retrieve a list of all CloudWatch dashboards in the AWS account.
+       - Provide the user with the names and descriptions of these dashboards, offering a brief overview of their purpose and contents.
+
+    2. **Fetch Recent CloudWatch Logs for Requested Services:**
+       - When a user specifies a service (e.g., EC2, Lambda, RDS), use the `fetch_cloudwatch_logs_for_service` tool to retrieve the most recent logs for that service.
+       - Analyze these logs to identify any errors, warnings, or anomalies.
+       - Summarize your findings, highlighting any patterns or recurring issues, and suggest potential actions or resolutions.
+
+    3. **Retrieve and Summarize CloudWatch Alarms:**
+       - If the user inquires about alarms or if log analysis indicates potential issues, use the `get_cloudwatch_alarms_for_service` tool to fetch relevant alarms.
+       - Provide details about active alarms, including their state, associated metrics, and any triggered thresholds.
+       - Offer recommendations based on the alarm statuses and suggest possible remediation steps.
+
+    4. **Analyze Specific CloudWatch Dashboards:**
+       - When a user requests information about a particular dashboard, use the `get_dashboard_summary` tool to retrieve and summarize its configuration.
+       - Detail the widgets present on the dashboard, their types, and the metrics or logs they display.
+       - Provide insights into the dashboard's focus areas and how it can be utilized for monitoring specific aspects of the AWS environment.
+
+    5. **List and Explore CloudWatch Log Groups:**
+       - Use the `list_log_groups` tool to retrieve all available CloudWatch log groups in the AWS account.
+       - Help the user navigate through these log groups and understand their purpose.
+       - When a user is interested in a specific log group, explain its contents and how to extract relevant information.
+    
+    6. **Analyze Specific Log Groups in Detail:**
+       - When a user wants to gain insights about a specific log group, use the `analyze_log_group` tool.
+       - Summarize key metrics like event count, error rates, and time distribution.
+       - Identify common patterns and potential issues based on log content.
+       - Provide actionable recommendations based on the observed patterns and error trends.
+    
+        **Guidelines:**
+    
+        - Always begin by listing the available CloudWatch dashboards to inform the user of existing monitoring setups.
+        - When analyzing logs or alarms, be thorough yet concise, ensuring clarity in your reporting.
+        - Avoid making assumptions; base your analysis strictly on the data retrieved from AWS tools.
+        - Clearly explain the available AWS services and their monitoring capabilities when prompted by the user.
+    
+        **Available AWS Services for Monitoring:**
+    
+        - **EC2/Compute Instances** [ec2]
+        - **Lambda Functions** [lambda]
+        - **RDS Databases** [rds]
+        - **EKS Kubernetes** [eks]
+        - **API Gateway** [apigateway]
+        - **CloudTrail** [cloudtrail]
+        - **S3 Storage** [s3]
+        - **VPC Networking** [vpc]
+        - **WAF Web Security** [waf]
+        - **Bedrock** [bedrock/generative AI]
+        - **IAM Logs** [iam] (Use this option when users inquire about security logs or events.)
+    
+        Your role is to assist users in monitoring and analyzing their AWS resources effectively, providing actionable insights based on the data available.
+        Provide your answers in Korean.
+        """
+
+        # MCP 클라이언트 가져오기
+        client = get_client()
+
+        # 사용자 입력 처리
+        question_time = datetime.now(timezone.utc)
+        response_text = client.process_user_input(user_input, system_prompt)
+        response_time = datetime.now(timezone.utc)
+
+        # 경과 시간 계산
+        elapsed = response_time - question_time
+        minutes, seconds = divmod(elapsed.total_seconds(), 60)
+        elapsed_str = f"{int(minutes)}분 {int(seconds)}초" if minutes else f"{int(seconds)}초"
+
+        # 성공 응답 반환
+        return cors_response(200, {
+            "status": "질문 처리 완료",
+            "answer": response_text + f"\n\n소요시간: {elapsed_str}"
+        }, origin)
+
+    except Exception as e:
+        # 오류 발생 시 기존 handle_llm1_request로 폴백
+        print(f"MCP 처리 중 오류 발생: {str(e)}")
+        try:
+            return handle_llm1_request(body, get_config(), origin)
+        except Exception as fallback_error:
+            print(f"폴백 처리 중 오류 발생: {str(fallback_error)}")
+            return cors_response(500, {
+                "error": "MCP 및 폴백 처리 중 오류 발생",
+                "detail": str(e)
+            }, origin)
 
 
 def get_table_registry():

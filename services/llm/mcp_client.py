@@ -28,7 +28,7 @@ class MCPClient:
         if auth_token:
             self.headers['Authorization'] = f'Bearer {auth_token}'
 
-    async def initialize(self) -> str:
+    def initialize(self) -> str:
         """
         MCP 서버와 세션 초기화
 

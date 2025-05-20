@@ -1,15 +1,15 @@
-# app.py
 import os
 import json
 import boto3
-from mcpengine import MCPEngine, Context
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Any
+from lambda_mcp.lambda_mcp import LambdaMCPServer
 
-# 엔진 초기화
-engine = MCPEngine("cloudguard")
+# Get session table name from environment variable
+session_table = os.environ.get('MCP_SESSION_TABLE', f'wga-mcp-sessions-{os.environ.get("ENV", "dev")}')
 aws_region = os.environ.get("AWS_REGION", "us-east-1")
 
+# Create AWS service clients
 cloudwatch_client = boto3.client('cloudwatch', region_name=aws_region)
 cloudtrail_client = boto3.client('cloudtrail', region_name=aws_region)
 logs_client = boto3.client('logs', region_name=aws_region)
@@ -17,7 +17,9 @@ xray_client = boto3.client('xray', region_name=aws_region)
 autoscaling_client = boto3.client('autoscaling', region_name=aws_region)
 ec2_client = boto3.client('ec2', region_name=aws_region)
 health_client = boto3.client('health', region_name=aws_region)
-BEDROCK_LOG_GROUP = os.environ.get("BEDROCK_LOG_GROUP", "bedrockloggroup")
+
+# Initialize the MCP server
+mcp_server = LambdaMCPServer(name="cloudguard", version="1.0.0", session_table=session_table)
 
 """
 This file contains the server information for enabling our application
@@ -33,7 +35,7 @@ to create tickets.
 """
 
 
-@engine.tool()
+@mcp_server.tool()
 def fetch_cloudwatch_logs_for_service(
         service_name: str,
         days: int = 3,
@@ -43,9 +45,9 @@ def fetch_cloudwatch_logs_for_service(
     Fetches CloudWatch logs for a specified service for the given number of days.
 
     Args:
-        service_name (str): The name of the service to fetch logs for (e.g., "ec2", "lambda", "rds")
-        days (int): Number of days of logs to fetch (default: 3)
-        filter_pattern (str): Optional CloudWatch Logs filter pattern
+        service_name: The name of the service to fetch logs for (e.g., "ec2", "lambda", "rds")
+        days: Number of days of logs to fetch (default: 3)
+        filter_pattern: Optional CloudWatch Logs filter pattern
 
     Returns:
         Dictionary with log groups and their recent log events
@@ -166,13 +168,13 @@ def fetch_cloudwatch_logs_for_service(
         return {"status": "error", "message": str(e)}
 
 
-@engine.tool()
+@mcp_server.tool()
 def list_cloudwatch_dashboards() -> Dict[str, Any]:
     """
     Lists all CloudWatch dashboards in the AWS account.
 
     Returns:
-        Dict[str, Any]: A dictionary containing the list of dashboard names and their ARNs.
+        A dictionary containing the list of dashboard names and their ARNs.
     """
     try:
         dashboards = []
@@ -194,13 +196,13 @@ def list_cloudwatch_dashboards() -> Dict[str, Any]:
         return {'status': 'error', 'message': str(e)}
 
 
-@engine.tool()
+@mcp_server.tool()
 def get_cloudwatch_alarms_for_service(service_name: str = None) -> Dict[str, Any]:
     """
     Fetches CloudWatch alarms, optionally filtering by service.
 
     Args:
-        service_name (str, optional): The name of the service to filter alarms for
+        service_name: The name of the service to filter alarms for
 
     Returns:
         Dictionary with alarm information
@@ -232,16 +234,16 @@ def get_cloudwatch_alarms_for_service(service_name: str = None) -> Dict[str, Any
         return {"status": "error", "message": str(e)}
 
 
-@engine.tool()
+@mcp_server.tool()
 def get_dashboard_summary(dashboard_name: str) -> Dict[str, Any]:
     """
     Retrieves and summarizes the configuration of a specified CloudWatch dashboard.
 
     Args:
-        dashboard_name (str): The name of the CloudWatch dashboard.
+        dashboard_name: The name of the CloudWatch dashboard.
 
     Returns:
-        Dict[str, Any]: A summary of the dashboard's widgets and their configurations.
+        A summary of the dashboard's widgets and their configurations.
     """
     try:
         # Fetch the dashboard configuration
@@ -272,13 +274,13 @@ def get_dashboard_summary(dashboard_name: str) -> Dict[str, Any]:
         return {'status': 'error', 'message': str(e)}
 
 
-@engine.tool()
+@mcp_server.tool()
 def list_log_groups(prefix: str = "") -> Dict[str, Any]:
     """
     Lists all CloudWatch log groups, optionally filtered by a prefix.
 
     Args:
-        prefix (str, optional): Optional prefix to filter log groups
+        prefix: Optional prefix to filter log groups
 
     Returns:
         Dictionary with list of log groups and their details
@@ -320,7 +322,7 @@ def list_log_groups(prefix: str = "") -> Dict[str, Any]:
         return {"status": "error", "message": str(e)}
 
 
-@engine.tool()
+@mcp_server.tool()
 def analyze_log_group(
         log_group_name: str,
         days: int = 1,
@@ -331,10 +333,10 @@ def analyze_log_group(
     Analyzes a specific CloudWatch log group and provides insights.
 
     Args:
-        log_group_name (str): The name of the log group to analyze
-        days (int): Number of days of logs to analyze (default: 1)
-        max_events (int): Maximum number of events to retrieve (default: 1000)
-        filter_pattern (str): Optional CloudWatch Logs filter pattern
+        log_group_name: The name of the log group to analyze
+        days: Number of days of logs to analyze (default: 1)
+        max_events: Maximum number of events to retrieve (default: 1000)
+        filter_pattern: Optional CloudWatch Logs filter pattern
 
     Returns:
         Dictionary with analysis and insights about the log group
@@ -465,69 +467,7 @@ def analyze_log_group(
         return {"status": "error", "message": str(e)}
 
 
-@engine.prompt()
-def analyze_aws_logs() -> str:
-    """Prompt to analyze AWS resources, including CloudWatch logs, alarms, and dashboards."""
-    return """
-    You are the monitoring agent responsible for analyzing AWS resources, including CloudWatch logs, alarms, and dashboards. Your tasks include:
-
-    1. **List Available CloudWatch Dashboards:**
-       - Utilize the `list_cloudwatch_dashboards` tool to retrieve a list of all CloudWatch dashboards in the AWS account.
-       - Provide the user with the names and descriptions of these dashboards, offering a brief overview of their purpose and contents.
-
-    2. **Fetch Recent CloudWatch Logs for Requested Services:**
-       - When a user specifies a service (e.g., EC2, Lambda, RDS), use the `fetch_cloudwatch_logs_for_service` tool to retrieve the most recent logs for that service.
-       - Analyze these logs to identify any errors, warnings, or anomalies.
-       - Summarize your findings, highlighting any patterns or recurring issues, and suggest potential actions or resolutions.
-
-    3. **Retrieve and Summarize CloudWatch Alarms:**
-       - If the user inquires about alarms or if log analysis indicates potential issues, use the `get_cloudwatch_alarms_for_service` tool to fetch relevant alarms.
-       - Provide details about active alarms, including their state, associated metrics, and any triggered thresholds.
-       - Offer recommendations based on the alarm statuses and suggest possible remediation steps.
-
-    4. **Analyze Specific CloudWatch Dashboards:**
-       - When a user requests information about a particular dashboard, use the `get_dashboard_summary` tool to retrieve and summarize its configuration.
-       - Detail the widgets present on the dashboard, their types, and the metrics or logs they display.
-       - Provide insights into the dashboard's focus areas and how it can be utilized for monitoring specific aspects of the AWS environment.
-
-    5. **List and Explore CloudWatch Log Groups:**
-   - Use the `list_log_groups` tool to retrieve all available CloudWatch log groups in the AWS account.
-   - Help the user navigate through these log groups and understand their purpose.
-   - When a user is interested in a specific log group, explain its contents and how to extract relevant information.
-
-   6. **Analyze Specific Log Groups in Detail:**
-   - When a user wants to gain insights about a specific log group, use the `analyze_log_group` tool.
-   - Summarize key metrics like event count, error rates, and time distribution.
-   - Identify common patterns and potential issues based on log content.
-   - Provide actionable recommendations based on the observed patterns and error trends.
-
-    **Guidelines:**
-
-    - Always begin by listing the available CloudWatch dashboards to inform the user of existing monitoring setups.
-    - When analyzing logs or alarms, be thorough yet concise, ensuring clarity in your reporting.
-    - Avoid making assumptions; base your analysis strictly on the data retrieved from AWS tools.
-    - Clearly explain the available AWS services and their monitoring capabilities when prompted by the user.
-
-    **Available AWS Services for Monitoring:**
-
-    - **EC2/Compute Instances** [ec2]
-    - **Lambda Functions** [lambda]
-    - **RDS Databases** [rds]
-    - **EKS Kubernetes** [eks]
-    - **API Gateway** [apigateway]
-    - **CloudTrail** [cloudtrail]
-    - **S3 Storage** [s3]
-    - **VPC Networking** [vpc]
-    - **WAF Web Security** [waf]
-    - **Bedrock** [bedrock/generative AI]
-    - **IAM Logs** [iam] (Use this option when users inquire about security logs or events.)
-
-    Your role is to assist users in monitoring and analyzing their AWS resources effectively, providing actionable insights based on the data available.
-    """
-
-def main():
-    # Start the server
-    engine.run(transport="http")
-
-# Lambda 핸들러 함수 가져오기
-handler = engine.get_lambda_handler()
+# Define the lambda handler
+def lambda_handler(event, context):
+    """AWS Lambda handler function."""
+    return mcp_server.handle_request(event, context)

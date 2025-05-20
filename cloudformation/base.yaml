@@ -332,6 +332,28 @@ Resources:
         ReadCapacityUnits: 5
         WriteCapacityUnits: 5
 
+  McpSessionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'wga-mcp-sessions-${Environment}'
+      AttributeDefinitions:
+        - AttributeName: 'session_id'
+          AttributeType: S
+      KeySchema:
+        - AttributeName: 'session_id'
+          KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+      TimeToLiveSpecification:
+        AttributeName: 'expires_at'
+        Enabled: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+        - Key: Service
+          Value: WGA
+        - Key: Purpose
+          Value: MCP Session Management
+
   # Cognito User Pool
   UserPool:
     Type: AWS::Cognito::UserPool
@@ -661,6 +683,15 @@ Resources:
       Type: String
       Value: !Ref ChatHistoryTable
       Description: 'Name of the DynamoDB table for chat history'
+
+  McpSessionsTableParameter:
+    Type: AWS::SSM::Parameter
+    DeletionPolicy: Delete
+    Properties:
+      Name: !Sub '/wga/${Environment}/McpSessionsTable'
+      Type: String
+      Value: !Ref McpSessionsTable
+      Description: 'Name of the DynamoDB table for mcp sessions'
 
 Outputs:
   DeploymentBucketName:

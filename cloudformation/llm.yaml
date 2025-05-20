@@ -76,29 +76,25 @@ Resources:
               - Effect: Allow
                 Action:
                   - logs:*
+                  - cloudwatch:*
                 Resource: '*'
               - Effect: Allow
                 Action:
-                  - bedrock:InvokeModel
-                  - bedrock:Retrieve
-                  - bedrock:RetrieveAndGenerate
-                  - bedrock:CreateKnowledgeBase
-                  - bedrock:GetKnowledgeBase
-                  - bedrock:ListKnowledgeBases
+                  - bedrock:*
+                  - cloudtrail:*
+                  - xray:*
+                  - autoscaling-plans:*
+                  - ec2:*
+                  - health:*
                   
                 Resource: '*'
               - Effect: Allow
                 Action:
-                  - dynamodb:Scan
-                  - dynamodb:GetItem
-                  - dynamodb:Query
-                  - dynamodb:PutItem
+                  - dynamodb:*
                 Resource: '*'
               - Effect: Allow
                 Action:
-                  - ssm:GetParameter
-                  - ssm:GetParameters
-                  - ssm:GetParametersByPath
+                  - ssm:*
                 Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/wga/${Environment}/*"
 
   LlmLambdaLayer:
@@ -234,14 +230,3 @@ Resources:
       FunctionName: !Ref LlmLambdaFunction
       Principal: 'apigateway.amazonaws.com'
       SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayId}/*/GET/health'
-
-  LlmApiDeployment:
-    Type: AWS::ApiGateway::Deployment
-    DependsOn:
-      - LlmMethod
-      - Llm2Method
-      - HealthMethod
-      - LlmOptionsMethod
-    Properties:
-      RestApiId: !Ref ApiGatewayId
-      StageName: !Ref Environment
