@@ -1,0 +1,157 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: WGA - Athena Query & Table Lambda
+
+Parameters:
+  Environment:
+    Type: String
+    Description: The deployment environment
+
+  ApiGatewayId:
+    Type: String
+    Description: API Gateway ID
+
+  ApiGatewayRootResourceId:
+    Type: String
+    Description: API Gateway Root Resource ID
+
+  FrontendRedirectDomain:
+    Type: String
+    Description: The domain for frontend redirection
+
+  AthenaOutputBucketName:
+    Type: String
+    Description: SSM parameter for Athena query result S3 bucket
+
+Resources:
+  AthenaUtilityLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub wga-athena-utility-role-${Environment}
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonAthenaFullAccess
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/AWSGlueConsoleFullAccess
+        - arn:aws:iam::aws:policy/AmazonSSMReadOnlyAccess
+      Policies:
+        - PolicyName: !Sub athena-utility-logging-inline-${Environment}
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:*
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                  - ssm:GetParametersByPath
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/wga/${Environment}/*"
+
+  AthenaUtilityLambdaLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: !Sub 'athena-utility-layer-${Environment}'
+      Description: Common Python dependencies
+      Content:
+        S3Bucket: !Sub 'wga-deployment-${Environment}'
+        S3Key: !Sub 'layers/common-layer-${Environment}.zip'
+      CompatibleRuntimes:
+        - python3.12
+
+  AthenaUtilityLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub 'wga-athena-utility-${Environment}'
+      Role: !GetAtt AthenaUtilityLambdaRole.Arn
+      Layers:
+        - !Ref AthenaUtilityLambdaLayer
+      Runtime: python3.12
+      Handler: lambda_function.lambda_handler
+      Timeout: 900
+      MemorySize: 512
+      Environment:
+        Variables:
+          ATHENA_DB: !Sub 'wga_logs_${Environment}'
+          S3_QUERY_OUTPUT: !Sub "s3://${AthenaOutputBucketName}/results/"
+          ENV: !Ref Environment
+      Code:
+        S3Bucket: !Sub 'wga-deployment-${Environment}'
+        S3Key: !Sub 'db/athena-utility-lambda-${Environment}.zip'
+
+  ExecuteQueryApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayId
+      ParentId: !Ref ApiGatewayRootResourceId
+      PathPart: 'execute-query'
+
+  ExecuteQueryMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayId
+      ResourceId: !Ref ExecuteQueryApiResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AthenaUtilityLambdaFunction.Arn}/invocations'
+        
+
+  AthenaUtilityLambdaPermissionForExecuteQuery:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref AthenaUtilityLambdaFunction
+      Principal: 'apigateway.amazonaws.com'
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayId}/*/POST/execute-query'
+
+  CreateTableApiResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayId
+      ParentId: !Ref ApiGatewayRootResourceId
+      PathPart: 'create-table'
+
+  CreateTableMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayId
+      ResourceId: !Ref CreateTableApiResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AthenaUtilityLambdaFunction.Arn}/invocations'
+        
+
+  AthenaUtilityLambdaPermissionForCreateTable:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref AthenaUtilityLambdaFunction
+      Principal: 'apigateway.amazonaws.com'
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayId}/*/POST/create-table'
+
+  AthenaUtilityApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn:
+      - ExecuteQueryMethod
+      - CreateTableMethod
+    Properties:
+      RestApiId: !Ref ApiGatewayId
+      StageName: !Ref Environment
+
+Outputs:
+  AthenaUtilityLambdaFunctionArn:
+    Description: ARN of the unified Athena utility Lambda
+    Value: !GetAtt AthenaUtilityLambdaFunction.Arn

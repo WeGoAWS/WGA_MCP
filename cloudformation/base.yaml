@@ -1,0 +1,728 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'WGA - Base Infrastructure CloudFormation Template'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - test
+      - prod
+    Description: The deployment environment
+  
+  BucketExists:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+  
+  OutputBucketExists:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+
+  AthenaOutputBucketExists:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+
+  GuardDutyExportBucketExists:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+
+  DockerBuildBucketExists:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+
+  FrontendBucketExists:
+    Type: String
+    Default: "false"
+    AllowedValues:
+      - "true"
+      - "false"
+
+  FrontendRedirectDomain:
+    Type: String
+    Default: placeholder.example.com
+    Description: Amplify frontend redirect
+
+  CallbackDomain:
+    Type: String
+    Default: placeholder.example.com/callback
+    Description: Slackbot callback domain
+
+  KnowledgeBaseId:
+    Type: String
+    Default: 9LLPTTVGDT
+    Description: KnowledgeBaseId
+
+  McpFunctionUrl:
+    Type: String
+    Default: placeholder.example.com
+    Description: McpFunctionUrl
+
+Conditions:
+  ShouldCreateBucket: !Equals [!Ref BucketExists, "false"]
+  ShouldCreateOutputBucket: !Equals [!Ref OutputBucketExists, "false"]
+  ShouldCreateAthenaOutputBucket: !Equals [!Ref AthenaOutputBucketExists, "false"]
+  ShouldCreateGuardDutyExportBucket: !Equals [!Ref GuardDutyExportBucketExists, "false"]
+  ShouldCreateDockerBuildBucket: !Equals [!Ref DockerBuildBucketExists, "false"]
+  ShouldCreateFrontendBucket: !Equals [!Ref FrontendBucketExists, "false"]
+  IsProd: !Equals [!Ref Environment, "prod"]
+  IsTest: !Equals [!Ref Environment, "test"]
+  IsDev: !Equals [!Ref Environment, "dev"]
+
+Resources:
+  # S3 Buckets
+  DeploymentBucket:
+    Type: AWS::S3::Bucket
+    Condition: ShouldCreateBucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub 'wga-deployment-${Environment}'
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  AthenaOutputBucket:
+    Type: AWS::S3::Bucket
+    Condition: ShouldCreateAthenaOutputBucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub 'wga-athenaoutputbucket-${Environment}'
+      VersioningConfiguration:
+        !If
+        - ShouldCreateAthenaOutputBucket
+        - Status: Enabled
+        - !Ref "AWS::NoValue"
+      BucketEncryption:
+        !If
+        - ShouldCreateAthenaOutputBucket
+        - ServerSideEncryptionConfiguration:
+            - ServerSideEncryptionByDefault:
+                SSEAlgorithm: AES256
+        - !Ref "AWS::NoValue"
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - '*'
+            AllowedMethods:
+              - GET
+              - PUT
+              - POST
+              - DELETE
+              - HEAD
+            AllowedOrigins:
+              - '*'
+            MaxAge: 3600
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  OutputBucket:
+    Type: AWS::S3::Bucket
+    Condition: ShouldCreateOutputBucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub 'wga-outputbucket-${Environment}'
+      VersioningConfiguration:
+        !If
+          - ShouldCreateOutputBucket
+          - Status: Enabled
+          - !Ref "AWS::NoValue"
+      BucketEncryption:
+        !If
+          - ShouldCreateOutputBucket
+          - ServerSideEncryptionConfiguration:
+              - ServerSideEncryptionByDefault:
+                  SSEAlgorithm: AES256
+          - !Ref "AWS::NoValue"
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - '*'
+            AllowedMethods:
+              - GET
+              - PUT
+              - POST
+              - DELETE
+              - HEAD
+            AllowedOrigins:
+              - '*'
+            MaxAge: 3600
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  GuardDutyExportBucket:
+    Type: AWS::S3::Bucket
+    Condition: ShouldCreateGuardDutyExportBucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub 'wga-guarddutyexportbucket-${Environment}'
+      VersioningConfiguration:
+        !If
+        - ShouldCreateGuardDutyExportBucket
+        - Status: Enabled
+        - !Ref "AWS::NoValue"
+      BucketEncryption:
+        !If
+        - ShouldCreateGuardDutyExportBucket
+        - ServerSideEncryptionConfiguration:
+            - ServerSideEncryptionByDefault:
+                SSEAlgorithm: AES256
+        - !Ref "AWS::NoValue"
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - '*'
+            AllowedMethods:
+              - GET
+              - PUT
+              - POST
+              - DELETE
+              - HEAD
+            AllowedOrigins:
+              - '*'
+            MaxAge: 3600
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  DockerBuildBucket:
+    Type: AWS::S3::Bucket
+    Condition: ShouldCreateDockerBuildBucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub 'wga-dockerbuildbucket-${Environment}'
+      VersioningConfiguration:
+        !If
+        - ShouldCreateDockerBuildBucket
+        - Status: Enabled
+        - !Ref "AWS::NoValue"
+      BucketEncryption:
+        !If
+        - ShouldCreateDockerBuildBucket
+        - ServerSideEncryptionConfiguration:
+            - ServerSideEncryptionByDefault:
+                SSEAlgorithm: AES256
+        - !Ref "AWS::NoValue"
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - '*'
+            AllowedMethods:
+              - GET
+              - PUT
+              - POST
+              - DELETE
+              - HEAD
+            AllowedOrigins:
+              - '*'
+            MaxAge: 3600
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  FrontendBucket:
+    Type: AWS::S3::Bucket
+    Condition: ShouldCreateFrontendBucket
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub 'wga-frontend-${Environment}'
+      VersioningConfiguration:
+        !If
+        - ShouldCreateFrontendBucket
+        - Status: Enabled
+        - !Ref "AWS::NoValue"
+      BucketEncryption:
+        !If
+        - ShouldCreateFrontendBucket
+        - ServerSideEncryptionConfiguration:
+            - ServerSideEncryptionByDefault:
+                SSEAlgorithm: AES256
+        - !Ref "AWS::NoValue"
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - '*'
+            AllowedMethods:
+              - GET
+              - PUT
+              - POST
+              - DELETE
+              - HEAD
+            AllowedOrigins:
+              - '*'
+            MaxAge: 3600
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  # DynamoDB
+  SlackbotSessionTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'SlackbotSessions-${Environment}'
+      AttributeDefinitions:
+        - AttributeName: 'slack_user_id'
+          AttributeType: S
+      KeySchema:
+        - AttributeName: 'slack_user_id'
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+  AthenaTableRegistryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'AthenaTableRegistry-${Environment}'
+      AttributeDefinitions:
+        - AttributeName: 'log_type'
+          AttributeType: S
+      KeySchema:
+        - AttributeName: 'log_type'
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+  ChatHistoryTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'wga-chat-history-${Environment}'
+      AttributeDefinitions:
+        - AttributeName: 'sessionId'
+          AttributeType: S
+        - AttributeName: 'userId'
+          AttributeType: S
+      KeySchema:
+        - AttributeName: 'sessionId'
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: 'UserIdIndex'
+          KeySchema:
+            - AttributeName: 'userId'
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+          ProvisionedThroughput:
+            ReadCapacityUnits: 5
+            WriteCapacityUnits: 5
+      ProvisionedThroughput:
+        ReadCapacityUnits: 5
+        WriteCapacityUnits: 5
+
+  # Cognito User Pool
+  UserPool:
+    Type: AWS::Cognito::UserPool
+    Properties:
+      UserPoolName: !Sub 'wga-user-pool-${Environment}'
+      AutoVerifiedAttributes:
+        - email
+      UsernameAttributes:
+        - email
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 8
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          RequireUppercase: true
+      Schema:
+        - Name: email
+          AttributeDataType: String
+          Mutable: true
+          Required: true
+        - Name: name
+          AttributeDataType: String
+          Mutable: true
+          Required: false
+      EmailConfiguration:
+        EmailSendingAccount: COGNITO_DEFAULT
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+      UserPoolTags:
+        Environment: !Ref Environment
+
+  # User Pool Client
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub 'wga-app-client-${Environment}'
+      UserPoolId: !Ref UserPool
+      GenerateSecret: false
+      AllowedOAuthFlowsUserPoolClient: true
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
+      SupportedIdentityProviders:
+        - COGNITO
+      CallbackURLs:
+        - !Sub 'https://${Environment}.${FrontendRedirectDomain}/redirect'
+        - !Sub 'https://${CallbackDomain}'
+        - !Sub 'http://localhost:5173/redirect'
+      LogoutURLs:
+        - !Sub 'https://${Environment}.${FrontendRedirectDomain}/redirect'
+        - !Sub 'http://localhost:5173/redirect'
+      AllowedOAuthFlows:
+        - code
+      AllowedOAuthScopes:
+        - email
+        - openid
+        - profile
+      PreventUserExistenceErrors: ENABLED
+
+  # User Pool Domain
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: !Sub 'wga-auth-${Environment}-${AWS::AccountId}'
+      UserPoolId: !Ref UserPool
+
+  # Identity Pool
+  IdentityPool:
+    Type: AWS::Cognito::IdentityPool
+    Properties:
+      IdentityPoolName: !Sub 'wga_identity_pool_${Environment}'
+      AllowUnauthenticatedIdentities: false
+      CognitoIdentityProviders:
+        - ClientId: !Ref UserPoolClient
+          ProviderName: !GetAtt UserPool.ProviderName
+
+  # Identity Pool Role Attachment
+  IdentityPoolRoleAttachment:
+    Type: AWS::Cognito::IdentityPoolRoleAttachment
+    Properties:
+      IdentityPoolId: !Ref IdentityPool
+      Roles:
+        authenticated: !GetAtt AuthenticatedUserRole.Arn
+
+  # IAM Role for Authenticated Users
+  AuthenticatedUserRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub 'wga-authenticated-user-role-${Environment}'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: cognito-identity.amazonaws.com
+            Action: 'sts:AssumeRoleWithWebIdentity'
+            Condition:
+              StringEquals:
+                'cognito-identity.amazonaws.com:aud': !Ref IdentityPool
+              'ForAnyValue:StringLike':
+                'cognito-identity.amazonaws.com:amr': authenticated
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess'
+      Policies:
+        - PolicyName: !Sub 'wga-authenticated-user-policy-${Environment}'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:GetObject'
+                  - 's3:PutObject'
+                  - 's3:ListBucket'
+                Resource:
+                  !If
+                    - ShouldCreateOutputBucket
+                    -
+                      - !GetAtt OutputBucket.Arn
+                      - !Sub '${OutputBucket.Arn}/*'
+                    -
+                      - !Sub 'arn:aws:s3:::wga-outputbucket-${Environment}'
+                      - !Sub 'arn:aws:s3:::wga-outputbucket-${Environment}/*'
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  # API Gateway
+  ApiGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub 'wga-api-${Environment}'
+      Description: 'WGA API Gateway'
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  # API Gateway에 대한 CORS 설정
+  ApiGatewayCorsSettings:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'https://${Environment}.${FrontendRedirectDomain}'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
+        gatewayresponse.header.Access-Control-Allow-Credentials: "'true'"
+      ResponseType: DEFAULT_4XX
+      RestApiId: !Ref ApiGateway
+
+  # 5XX 오류에 대한 CORS 설정도 추가
+  ApiGatewayCorsSettings5XX:
+    Type: AWS::ApiGateway::GatewayResponse
+    Properties:
+      ResponseParameters:
+        gatewayresponse.header.Access-Control-Allow-Origin: !Sub "'https://${Environment}.${FrontendRedirectDomain}'"
+        gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        gatewayresponse.header.Access-Control-Allow-Methods: "'GET,POST,PUT,DELETE,OPTIONS'"
+        gatewayresponse.header.Access-Control-Allow-Credentials: "'true'"
+      ResponseType: DEFAULT_5XX
+      RestApiId: !Ref ApiGateway
+
+  # Cognito Authorizer
+  CognitoAuthorizer:
+    Type: AWS::ApiGateway::Authorizer
+    Properties:
+      Name: CognitoAuth
+      Type: COGNITO_USER_POOLS
+      IdentitySource: method.request.header.Authorization
+      RestApiId: !Ref ApiGateway
+      ProviderARNs:
+        - !GetAtt UserPool.Arn
+
+  # SSM Parameters
+  DeploymentBucketParameter:
+    Type: AWS::SSM::Parameter
+    DeletionPolicy: Delete
+    Properties:
+      Name: !Sub '/wga/${Environment}/DeploymentBucketName'
+      Type: String
+      Value: !If [ShouldCreateBucket, !Ref DeploymentBucket, !Sub 'wga-deployment-${Environment}']
+      Description: Name of the S3 bucket for deployment packages
+
+  OutputBucketParameter:
+    Type: AWS::SSM::Parameter
+    DeletionPolicy: Delete
+    Properties:
+      Name: !Sub '/wga/${Environment}/OutputBucketName'
+      Type: String
+      Value: !If [ShouldCreateOutputBucket, !Ref OutputBucket, !Sub 'wga-outputbucket-${Environment}']
+      Description: Name of the S3 bucket for output files
+
+  AthenaOutputBucketParameter:
+    Type: AWS::SSM::Parameter
+    DeletionPolicy: Delete
+    Properties:
+      Name: !Sub '/wga/${Environment}/AthenaOutputBucketName'
+      Type: String
+      Value: !If [ShouldCreateAthenaOutputBucket, !Ref AthenaOutputBucket, !Sub 'wga-athenaoutputbucket-${Environment}']
+      Description: S3 bucket for Athena query results
+
+  GuardDutyExportBucketParameter:
+    Type: AWS::SSM::Parameter
+    DeletionPolicy: Delete
+    Properties:
+      Name: !Sub '/wga/${Environment}/GuardDutyExportBucketName'
+      Type: String
+      Value: !If [ShouldCreateGuardDutyExportBucket, !Ref GuardDutyExportBucket, !Sub 'wga-guarddutyexportbucket-${Environment}']
+      Description: S3 bucket for GuardDuty Export
+
+  DockerBuildBucketParameter:
+    Type: AWS::SSM::Parameter
+    DeletionPolicy: Delete
+    Properties:
+      Name: !Sub '/wga/${Environment}/DockerBuildBucketName'
+      Type: String
+      Value: !If [ ShouldCreateDockerBuildBucket, !Ref DockerBuildBucket, !Sub 'wga-dockerbuildbucket-${Environment}' ]
+      Description: S3 bucket for Docker Build
+
+  FrontendBucketParameter:
+    Type: AWS::SSM::Parameter
+    DeletionPolicy: Delete
+    Properties:
+      Name: !Sub '/wga/${Environment}/FrontendBucketName'
+      Type: String
+      Value: !If [ ShouldCreateFrontendBucket, !Ref FrontendBucket, !Sub 'wga-frontend-${Environment}' ]
+      Description: S3 bucket for frontend hosting
+
+  UserPoolIdParameter:
+    Type: AWS::SSM::Parameter
+    DeletionPolicy: Delete
+    Properties:
+      Name: !Sub '/wga/${Environment}/UserPoolId'
+      Type: String
+      Value: !Ref UserPool
+      Description: ID of the Cognito User Pool
+
+  UserPoolClientIdParameter:
+    Type: AWS::SSM::Parameter
+    DeletionPolicy: Delete
+    Properties:
+      Name: !Sub '/wga/${Environment}/UserPoolClientId'
+      Type: String
+      Value: !Ref UserPoolClient
+      Description: ID of the Cognito User Pool Client
+
+  UserPoolDomainParameter:
+    Type: AWS::SSM::Parameter
+    DeletionPolicy: Delete
+    Properties:
+      Name: !Sub '/wga/${Environment}/UserPoolDomain'
+      Type: String
+      Value: !Sub 'https://${UserPoolDomain}.auth.${AWS::Region}.amazoncognito.com'
+      Description: Domain of the Cognito User Pool
+
+  IdentityPoolIdParameter:
+    Type: AWS::SSM::Parameter
+    DeletionPolicy: Delete
+    Properties:
+      Name: !Sub '/wga/${Environment}/IdentityPoolId'
+      Type: String
+      Value: !Ref IdentityPool
+      Description: ID of the Cognito Identity Pool
+
+  ApiGatewayIdParameter:
+    Type: AWS::SSM::Parameter
+    DeletionPolicy: Delete
+    Properties:
+      Name: !Sub '/wga/${Environment}/ApiGatewayId'
+      Type: String
+      Value: !Ref ApiGateway
+      Description: ID of the API Gateway
+
+  ApiGatewayRootResourceIdParameter:
+    Type: AWS::SSM::Parameter
+    DeletionPolicy: Delete
+    Properties:
+      Name: !Sub '/wga/${Environment}/ApiGatewayRootResourceId'
+      Type: String
+      Value: !GetAtt ApiGateway.RootResourceId
+      Description: Root Resource ID of the API Gateway
+
+  FrontendRedirectDomainParameter:
+    Type: AWS::SSM::Parameter
+    DeletionPolicy: Delete
+    Properties:
+      Name: !Sub '/wga/${Environment}/FrontendRedirectDomain'
+      Type: String
+      Value: !Ref FrontendRedirectDomain
+      Description: Frontend redirect domain
+
+  CallbackDomainParameter:
+    Type: AWS::SSM::Parameter
+    DeletionPolicy: Delete
+    Properties:
+      Name: !Sub '/wga/${Environment}/CallbackDomain'
+      Type: String
+      Value: !Ref CallbackDomain
+      Description: Slackbot callback domain
+
+  KnowledgeBaseIdParameter:
+    Type: AWS::SSM::Parameter
+    DeletionPolicy: Delete
+    Properties:
+      Name: !Sub '/wga/${Environment}/KnowledgeBaseId'
+      Type: String
+      Value: !Ref KnowledgeBaseId
+      Description: KnowledgeBaseId
+
+  McpFunctionUrlParameter:
+    Type: AWS::SSM::Parameter
+    DeletionPolicy: Delete
+    Properties:
+      Name: !Sub '/wga/${Environment}/McpFunctionUrl'
+      Type: String
+      Value: !Ref McpFunctionUrl
+      Description: McpFunctionUrl
+
+  ChatHistoryTableParameter:
+    Type: AWS::SSM::Parameter
+    DeletionPolicy: Delete
+    Properties:
+      Name: !Sub '/wga/${Environment}/ChatHistoryTable'
+      Type: String
+      Value: !Ref ChatHistoryTable
+      Description: 'Name of the DynamoDB table for chat history'
+
+Outputs:
+  DeploymentBucketName:
+    Description: Name of the S3 bucket for deployment packages
+    Value: !If [ShouldCreateBucket, !Ref DeploymentBucket, !Sub 'wga-deployment-${Environment}']
+
+  OutputBucketName:
+    Description: Name of the S3 bucket for output files
+    Value: !If [ShouldCreateOutputBucket, !Ref OutputBucket, !Sub 'wga-outputbucket-${Environment}']
+
+  AthenaOutputBucketName:
+    Description: Name of the S3 bucket for athena output files
+    Value: !If [ShouldCreateAthenaOutputBucket, !Ref AthenaOutputBucket, !Sub 'wga-athenaoutputbucket-${Environment}']
+
+  GuardDutyExportBucketName:
+    Description: Name of the S3 bucket for guardduty export files
+    Value: !If [ShouldCreateGuardDutyExportBucket, !Ref GuardDutyExportBucket, !Sub 'wga-guarddutyexportbucket-${Environment}']
+
+  DockerBuildBucketName:
+    Description: Name of the S3 bucket for docker build files
+    Value: !If [ ShouldCreateDockerBuildBucket, !Ref DockerBuildBucket, !Sub 'wga-dockerbuildbucket-${Environment}' ]
+
+  FrontendBucketName:
+    Description: Name of the S3 bucket for frontend hosting
+    Value: !If [ShouldCreateFrontendBucket, !Ref FrontendBucket, !Sub 'wga-frontend-${Environment}']
+
+  UserPoolId:
+    Description: ID of the Cognito User Pool
+    Value: !Ref UserPool
+
+  UserPoolClientId:
+    Description: ID of the Cognito User Pool Client
+    Value: !Ref UserPoolClient
+
+  UserPoolDomain:
+    Description: Domain of the Cognito User Pool
+    Value: !Sub 'https://${UserPoolDomain}.auth.${AWS::Region}.amazoncognito.com'
+
+  IdentityPoolId:
+    Description: ID of the Cognito Identity Pool
+    Value: !Ref IdentityPool
+
+  ApiGatewayId:
+    Description: ID of the API Gateway
+    Value: !Ref ApiGateway
+
+  ApiGatewayRootResourceId:
+    Description: Root Resource ID of the API Gateway
+    Value: !GetAtt ApiGateway.RootResourceId
+
+  FrontendRedirectDomain:
+    Description: Placeholder for frontend redirect domain
+    Value: !Ref FrontendRedirectDomain
+
+  CallbackDomain:
+    Description: Placeholder for slackbot callback domain
+    Value: !Ref CallbackDomain
+
+  KnowledgeBaseId:
+    Description: KnowledgeBaseId
+    Value: !Ref KnowledgeBaseId
+
+  McpFunctionUrl:
+    Description: Placeholder for McpFunctionUrl
+    Value: !Ref McpFunctionUrl

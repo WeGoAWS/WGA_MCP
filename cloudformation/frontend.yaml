@@ -1,0 +1,156 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'WGA Frontend Infrastructure CloudFormation Template'
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - test
+      - prod
+    Description: The deployment environment
+
+  DomainName:
+    Type: String
+    Default: ""
+    Description: Domain name for the frontend (leave empty for CloudFront distribution URL only)
+
+  CertificateARN:
+    Type: String
+    Default: ""
+    Description: ARN of ACM certificate for HTTPS (required if DomainName is provided)
+
+  # 새 파라미터 추가
+  ApiEndpoint:
+    Type: String
+    Default: ""
+    Description: API Gateway endpoint URL for redirecting API requests
+
+  FrontendBucketName:
+    Type: String
+    Description: Name of the existing S3 bucket to host frontend assets
+
+Conditions:
+  IsProd: !Equals [!Ref Environment, "prod"]
+  IsDev: !Equals [!Ref Environment, "dev"]
+  IsTest: !Equals [!Ref Environment, "test"]
+  HasApiEndpoint: !Not [!Equals [!Ref ApiEndpoint, ""]]
+
+Resources:
+  FrontendBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref FrontendBucketName
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: AllowAmplifyFullReadAccess
+            Effect: Allow
+            Principal:
+              Service: amplify.amazonaws.com
+            Action:
+              - s3:GetObject
+              - s3:GetObjectVersion
+              - s3:ListBucket
+              - s3:GetBucketLocation
+            Resource:
+              - !Sub arn:aws:s3:::${FrontendBucketName}
+              - !Sub arn:aws:s3:::${FrontendBucketName}/*
+
+  # Amplify App for frontend hosting
+  AmplifyApp:
+    Type: AWS::Amplify::App
+    Properties:
+      Name: !Sub 'wga-frontend-${Environment}'
+      Repository: ''
+      Platform: WEB
+      Description: !Sub 'Amplify App for WGA Frontend - ${Environment}'
+      BuildSpec: |
+        version: 1
+        frontend:
+          phases:
+            preBuild:
+              commands:
+                - npm install
+            build:
+              commands:
+                - npm run build
+          artifacts:
+            baseDirectory: dist
+            files:
+              - '**/*'
+          cache:
+            paths:
+              - node_modules/**
+      CustomRules:
+        - Source: '</^[^.]+$|\.(?!(css|gif|ico|jpg|js|png|txt|svg|woff|woff2|ttf|map|json)$)([^.]+$)/>'
+          Target: '/index.html'
+          Status: '200'
+
+  AmplifyBranch:
+    Type: AWS::Amplify::Branch
+    Properties:
+      AppId: !GetAtt AmplifyApp.AppId
+      BranchName: !Ref Environment
+      Stage: !If
+        - IsProd
+        - PRODUCTION
+        - !If
+          - IsDev
+          - DEVELOPMENT
+          - !If
+            - IsTest
+            - BETA
+            - DEVELOPMENT
+      EnableAutoBuild: true
+      EnvironmentVariables:
+        - Name: ENV
+          Value: !Ref Environment
+        # API 환경 변수 추가
+        - !If
+          - HasApiEndpoint
+          - Name: VITE_API_DEST
+            Value: !Ref ApiEndpoint
+          - !Ref AWS::NoValue
+
+  # SSM Parameters
+  AmplifyAppIdParameter:
+    Type: AWS::SSM::Parameter
+    DeletionPolicy: Delete
+    Properties:
+      Name: !Sub '/wga/${Environment}/AmplifyAppId'
+      Type: String
+      Value: !GetAtt AmplifyApp.AppId
+      Description: Amplify App ID
+
+  AmplifyDefaultDomainParameter:
+    Type: AWS::SSM::Parameter
+    DeletionPolicy: Delete
+    Properties:
+      Name: !Sub '/wga/${Environment}/AmplifyDefaultDomain'
+      Type: String
+      Value: !GetAtt AmplifyApp.DefaultDomain
+      Description: Default domain of the Amplify App
+
+  AmplifyDefaultDomainWithEnvParameter:
+    Type: AWS::SSM::Parameter
+    DeletionPolicy: Delete
+    Properties:
+      Name: !Sub '/wga/${Environment}/AmplifyDefaultDomainWithEnv'
+      Type: String
+      Value: !Sub '${Environment}.${AmplifyApp.DefaultDomain}'
+      Description: Default domain of the Amplify App with Environment prefix
+
+Outputs:
+  AmplifyAppId:
+    Description: Amplify App ID
+    Value: !GetAtt AmplifyApp.AppId
+
+  AmplifyAppDefaultDomain:
+    Description: Default domain of the Amplify App
+    Value: !GetAtt AmplifyApp.DefaultDomain
+
+  AmplifyAppDefaultDomainWithEnv:
+    Description: Amplify Default Domain with Environment prefix
+    Value: !Sub '${Environment}.${AmplifyApp.DefaultDomain}'

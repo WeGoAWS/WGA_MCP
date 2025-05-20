@@ -1,0 +1,6 @@
+mcpengine[cli,lambda]
+langchain-aws
+langchain-mcp-adapters
+langgraph
+mcp
+zmq

@@ -1,0 +1,114 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "WGA - MCP CloudFormation Template"
+
+Parameters:
+  Environment:
+    Type: String
+    Default: dev
+    AllowedValues:
+      - dev
+      - test
+      - prod
+    Description: The deployment environment
+
+  DockerBuildBucketName:
+    Type: String
+    Description: SSM parameter for Docker Build S3 bucket
+
+Resources:
+  MCPRepo:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub "wga-mcp-${Environment}"
+      ImageScanningConfiguration:
+        ScanOnPush: true
+
+  CodeBuildRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AWS::StackName}-codebuild-role-${Environment}"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryPowerUser
+        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+      # CloudWatch Logs 권한 추가
+      Policies:
+        - PolicyName: !Sub "${AWS::StackName}-CodeBuildCloudWatchLogsAccess"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*"
+                  - !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*:*"
+        - PolicyName: !Sub "${AWS::StackName}-ECRRepositoryPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:CreateRepository
+                Resource: !Sub "arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/*"
+
+  DockerBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub "wga-docker-build-${Environment}"
+      ServiceRole: !GetAtt CodeBuildRole.Arn
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_MEDIUM
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:3.0
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: ENV
+            Value: !Ref Environment
+          - Name: REGION
+            Value: !Ref "AWS::Region"
+          - Name: ACCOUNT_ID
+            Value: !Ref "AWS::AccountId"
+          - Name: MCP_ECR_IMAGE_TAG
+            Value: "latest"
+      Source:
+        Type: S3
+        Location: !Sub "${DockerBuildBucketName}/docker-build-${Environment}.zip"
+        BuildSpec: |-
+          version: 0.2
+          
+          phases:
+            pre_build:
+              commands:
+                - echo Logging in to Amazon ECR...
+                - aws ecr get-login-password --region $REGION | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com
+                - echo Check if repository exists...
+                - aws ecr describe-repositories --repository-names "wga-mcp-$ENV" || aws ecr create-repository --repository-name "wga-mcp-$ENV"
+                - REPOSITORY_URI=$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/wga-mcp-$ENV
+                
+            build:
+              commands:
+                - echo Build started on `date`
+                - echo Building the Docker image...
+                - docker build -t $REPOSITORY_URI:$MCP_ECR_IMAGE_TAG .
+                
+            post_build:
+              commands:
+                - echo Build completed on `date`
+                - echo Pushing the Docker image...
+                - docker push $REPOSITORY_URI:$MCP_ECR_IMAGE_TAG
+                - echo Image push complete
+      Artifacts:
+        Type: NO_ARTIFACTS
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+      TimeoutInMinutes: 60
